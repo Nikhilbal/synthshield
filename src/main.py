@@ -1,156 +1,185 @@
-import json
-from pathlib import Path
+from src.engine import (
+    detect_sensitive_inference,
+    load_json,
+)
 
-
-# ---------------------------------------------------------
-# SYNTHSHIELD - Stage 1
-# Basic Sensitive Aggregation Inference Detector
-# ---------------------------------------------------------
-
-
-# Find the main project directory.
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-# Point to our synthetic company data folder.
-DATA_DIR = PROJECT_ROOT / "data"
-
-
-def load_json(filename):
-    """
-    Load one JSON data source from the data directory.
-    """
-
-    file_path = DATA_DIR / filename
-
-    with open(file_path, "r", encoding="utf-8") as file:
-        return json.load(file)
-
-
-def convert_to_searchable_text(record):
-    """
-    Convert a JSON dictionary into lowercase text
-    so our first detector can search for signals.
-    """
-
-    return json.dumps(record).lower().replace("-", " ")
-
-
-def detect_sensitive_inference(calendar_data, travel_data, finance_data):
-    """
-    Check whether several individually allowed data sources,
-    when combined, create a sensitive business inference.
-    """
-
-    calendar_text = convert_to_searchable_text(calendar_data)
-    travel_text = convert_to_searchable_text(travel_data)
-    finance_text = convert_to_searchable_text(finance_data)
-
-    signals = {
-        "strategic_meeting": (
-            "cfo" in calendar_text
-            and "alphacorp" in calendar_text
-            and "meeting" in calendar_text
-        ),
-
-        "executive_travel": (
-            "cfo" in travel_text
-            and "london" in travel_text
-        ),
-
-        "due_diligence": (
-            "due diligence" in finance_text
-        ),
-    }
-
-    triggered_signals = sum(signals.values())
-
-    if triggered_signals == 3:
-
-        return {
-            "sensitive_inference": True,
-            "derived_information": "Company may be acquiring AlphaCorp.",
-            "confidence": 95,
-            "inference_synergy_score": 89,
-            "risk_level": "CRITICAL",
-            "decision": "BLOCK",
-            "reason": (
-                "Sensitive strategic information was created "
-                "by combining multiple individually allowed sources."
-            ),
-            "signals": signals,
-        }
-
-    return {
-        "sensitive_inference": False,
-        "derived_information": None,
-        "confidence": 0,
-        "inference_synergy_score": 0,
-        "risk_level": "LOW",
-        "decision": "ALLOW",
-        "reason": "No sensitive aggregation inference detected.",
-        "signals": signals,
-    }
+from src.coalition import (
+    analyze_all_coalitions,
+    calculate_inference_synergy,
+    find_minimal_sensitive_coalitions,
+    run_counterfactual_removals,
+)
 
 
 def main():
 
-    print("=" * 60)
+    print("=" * 70)
     print("SYNTHSHIELD")
-    print("Sensitive Aggregation Inference Protection")
-    print("=" * 60)
+    print("Counterfactual Sensitive-Inference Security Engine")
+    print("=" * 70)
 
-    calendar_data = load_json("calendar.json")
-    travel_data = load_json("travel.json")
-    finance_data = load_json("finance.json")
+    sources = {
+        "calendar": load_json("calendar.json"),
+        "travel": load_json("travel.json"),
+        "finance": load_json("finance.json"),
+    }
 
-    print("\nDATA SOURCES ACCESSED")
-    print("---------------------")
-    print("✓ Executive Calendar")
-    print("✓ Corporate Travel")
-    print("✓ Finance System")
+    print("\nFULL DATA ACCESS")
+    print("----------------")
 
-    print("\nINDIVIDUAL SOURCE STATUS")
-    print("------------------------")
-    print("Calendar : ALLOWED")
-    print("Travel   : ALLOWED")
-    print("Finance  : ALLOWED")
+    for source_name in sources:
+        print(f"✓ {source_name.title()}")
 
-    result = detect_sensitive_inference(
-        calendar_data,
-        travel_data,
-        finance_data,
+    full_analysis = detect_sensitive_inference(sources)
+
+    print("\nFULL COALITION ANALYSIS")
+    print("-----------------------")
+
+    print(
+        f'Risk Score          : '
+        f'{full_analysis["risk_score"]}/100'
     )
 
-    print("\nDERIVED KNOWLEDGE ANALYSIS")
-    print("--------------------------")
+    print(
+        f'Risk Level          : '
+        f'{full_analysis["risk_level"]}'
+    )
 
-    if result["sensitive_inference"]:
+    print(
+        f'Sensitive Inference : '
+        f'{full_analysis["sensitive_inference"]}'
+    )
 
-        print(f'Derived information : "{result["derived_information"]}"')
-        print(f'Confidence          : {result["confidence"]}%')
+    if full_analysis["derived_information"]:
+
         print(
-            f'Inference Synergy   : '
-            f'{result["inference_synergy_score"]}/100'
+            f'Derived Information : '
+            f'"{full_analysis["derived_information"]}"'
         )
-        print(f'Risk Level          : {result["risk_level"]}')
 
-        print("\nSECURITY DECISION")
-        print("-----------------")
-        print(f'Decision : {result["decision"]}')
-        print(f'Reason   : {result["reason"]}')
+    print(
+        f'Decision            : '
+        f'{full_analysis["decision"]}'
+    )
+
+    coalition_results = analyze_all_coalitions(
+        sources
+    )
+
+    print("\nALL COALITION TESTS")
+    print("-------------------")
+
+    for result in coalition_results:
+
+        coalition_name = " + ".join(
+            result["sources"]
+        )
+
+        sensitive = (
+            "YES"
+            if result["sensitive_inference"]
+            else "NO"
+        )
+
+        print(
+            f"{coalition_name:<30} "
+            f"Risk={result['risk_score']:<3} "
+            f"Sensitive={sensitive:<3} "
+            f"Decision={result['decision']}"
+        )
+
+    minimal_coalitions = (
+        find_minimal_sensitive_coalitions(
+            coalition_results
+        )
+    )
+
+    print("\nMINIMAL SENSITIVE COALITION")
+    print("---------------------------")
+
+    if minimal_coalitions:
+
+        for coalition in minimal_coalitions:
+
+            coalition_name = " + ".join(
+                coalition["sources"]
+            )
+
+            print(
+                f"Required sources: {coalition_name}"
+            )
 
     else:
 
-        print("No sensitive derived knowledge detected.")
-        print("Decision : ALLOW")
+        print(
+            "No sensitive coalition detected."
+        )
 
-    print("\nSIGNALS")
-    print("-------")
+    counterfactual_results = (
+        run_counterfactual_removals(
+            sources
+        )
+    )
 
-    for signal, detected in result["signals"].items():
-        print(f"{signal}: {detected}")
+    print("\nCOUNTERFACTUAL REMOVAL TESTS")
+    print("----------------------------")
 
-    print("\n" + "=" * 60)
+    for result in counterfactual_results:
+
+        sensitive_after = (
+            "YES"
+            if result["sensitive_after_removal"]
+            else "NO"
+        )
+
+        print(
+            f"Remove {result['removed_source']:<10} "
+            f"| Risk "
+            f"{result['risk_before']} → "
+            f"{result['risk_after']} "
+            f"| Reduction "
+            f"{result['risk_reduction']} "
+            f"| Sensitive after removal: "
+            f"{sensitive_after}"
+        )
+
+    synergy = calculate_inference_synergy(
+        coalition_results,
+        total_sources=len(sources),
+    )
+
+    print("\nINFERENCE SYNERGY")
+    print("-----------------")
+
+    print(
+        f"Full coalition risk       : "
+        f"{synergy['full_risk']}"
+    )
+
+    print(
+        f"Strongest partial risk    : "
+        f"{synergy['strongest_partial_risk']}"
+    )
+
+    print(
+        f"Prototype synergy score   : "
+        f"{synergy['synergy_score']}/100"
+    )
+
+    print("\nFINAL SECURITY DECISION")
+    print("-----------------------")
+
+    print(
+        f"Decision : "
+        f"{full_analysis['decision']}"
+    )
+
+    print(
+        f"Reason   : "
+        f"{full_analysis['reason']}"
+    )
+
+    print("\n" + "=" * 70)
 
 
 if __name__ == "__main__":
