@@ -1,0 +1,22 @@
+{
+  "agent_id": "finance-agent-001",
+  "agent_name": "Monthly Expense Assistant",
+  "approved_purpose": "Prepare the monthly company expense report",
+  "purpose_keywords": [
+    "monthly",
+    "expense",
+    "expenses",
+    "report"
+  ],
+  "allowed_sources": [
+    "finance",
+    "travel"
+  ],
+  "forbidden_inference_keywords": [
+    "acquire",
+    "acquiring",
+    "acquisition",
+    "merger",
+    "alphacorp"
+  ]
+}
