@@ -14,10 +14,13 @@ iniconfig==2.3.1
 opentelemetry-api==1.45.1
 packaging==26.3
 pluggy==1.6.0
+psycopg==3.3.6
+psycopg-binary==3.3.6
 pydantic==2.13.5
 pydantic_core==2.46.5
 Pygments==2.21.0
 pytest==9.1.1
+python-dotenv==1.2.4
 starlette==1.7.0
 truststore==0.10.4
 typing-inspection==0.4.4

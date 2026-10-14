@@ -1,7 +1,8 @@
 
+import logging
 from typing import Literal
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
 from src.engine import (
@@ -16,31 +17,39 @@ from src.purpose import (
 )
 
 from src.audit import write_security_event
+from src.event_store import save_security_event
 
 
-# ---------------------------------------------------------
+# =========================================================
 # SYNTHSHIELD
-# Stage 6 - FastAPI Security Evaluation Backend
-# ---------------------------------------------------------
+# Stage 7.9 - FastAPI and PostgreSQL Integration
+# =========================================================
+
+logger = logging.getLogger(__name__)
+
 
 app = FastAPI(
     title="SYNTHSHIELD API",
     description=(
-        "Prototype API for sensitive aggregation "
-        "inference and purpose-policy evaluation."
+        "Sensitive Aggregation Inference Protection "
+        "with Purpose Lock and PostgreSQL Audit Logging"
     ),
-    version="0.1.0",
+    version="0.2.0",
 )
 
 
-# Only our three synthetic sources are supported.
-SourceName = Literal["calendar", "travel", "finance"]
+# =========================================================
+# REQUEST VALIDATION
+# =========================================================
+
+SourceName = Literal[
+    "calendar",
+    "travel",
+    "finance",
+]
 
 
 class EvaluationRequest(BaseModel):
-    """
-    Defines the JSON data clients are allowed to send.
-    """
 
     requested_task: str = Field(
         min_length=1,
@@ -54,6 +63,7 @@ class EvaluationRequest(BaseModel):
 
     @model_validator(mode="after")
     def check_unique_sources(self):
+
         if len(self.sources) != len(set(self.sources)):
             raise ValueError(
                 "Each source must appear only once."
@@ -62,10 +72,11 @@ class EvaluationRequest(BaseModel):
         return self
 
 
+# =========================================================
+# RESPONSE MODEL
+# =========================================================
+
 class EvaluationResponse(BaseModel):
-    """
-    Defines the JSON data returned to clients.
-    """
 
     event_id: str
     agent_id: str
@@ -77,33 +88,35 @@ class EvaluationResponse(BaseModel):
     reasons: list[str]
 
 
+# =========================================================
+# ENDPOINT 1 - HEALTH CHECK
+# =========================================================
+
 @app.get("/health")
 def health_check():
-    """
-    Simple endpoint for checking whether
-    the API is responding.
-    """
 
     return {
         "service": "SYNTHSHIELD",
         "status": "running",
-        "version": "0.1.0",
+        "version": "0.2.0",
     }
 
+
+# =========================================================
+# ENDPOINT 2 - SECURITY EVALUATION
+# =========================================================
 
 @app.post(
     "/v1/evaluate",
     response_model=EvaluationResponse,
 )
-def evaluate_agent_action(request: EvaluationRequest):
-    """
-    Evaluate an AI task using server-side synthetic data.
+def evaluate_agent_action(
+    request: EvaluationRequest,
+):
 
-    This endpoint returns a policy decision only.
-    It does not independently enforce that decision.
-    """
-
-    # Step 1: Load the selected synthetic sources.
+    # -----------------------------------------------------
+    # STEP 1: LOAD REQUESTED DATA SOURCES
+    # -----------------------------------------------------
 
     sources = {
         source_name: load_json(
@@ -112,35 +125,46 @@ def evaluate_agent_action(request: EvaluationRequest):
         for source_name in request.sources
     }
 
-    # Step 2: Analyze aggregation inference.
+    # -----------------------------------------------------
+    # STEP 2: DETECT SENSITIVE INFERENCE
+    # -----------------------------------------------------
 
     inference_result = detect_sensitive_inference(
         sources
     )
 
-    # Step 3: Load the approved purpose policy.
+    # -----------------------------------------------------
+    # STEP 3: LOAD THE APPROVED PURPOSE POLICY
+    # -----------------------------------------------------
 
     purpose_policy = load_purpose_policy()
 
-    # Step 4: Analyze the requested task.
+    # -----------------------------------------------------
+    # STEP 4: EVALUATE PURPOSE DRIFT
+    # -----------------------------------------------------
 
     purpose_result = evaluate_purpose(
         policy=purpose_policy,
         requested_task=request.requested_task,
         accessed_sources=request.sources,
         proposed_output=(
-            inference_result["derived_information"] or ""
+            inference_result["derived_information"]
+            or ""
         ),
     )
 
-    # Step 5: Produce the final decision.
+    # -----------------------------------------------------
+    # STEP 5: COMBINE SECURITY DECISIONS
+    # -----------------------------------------------------
 
     final_result = combine_security_decisions(
         inference_result,
         purpose_result,
     )
 
-    # Step 6: Save audit metadata.
+    # -----------------------------------------------------
+    # STEP 6: WRITE JSONL AUDIT EVENT
+    # -----------------------------------------------------
 
     audit_event = write_security_event(
         agent_id=purpose_policy["agent_id"],
@@ -150,9 +174,40 @@ def evaluate_agent_action(request: EvaluationRequest):
         final_security_result=final_result,
     )
 
-    # Step 7: Return a decision without
-    # exposing the raw synthetic source records
-    # or the derived secret.
+    # -----------------------------------------------------
+    # STEP 7: SAVE THE EVENT TO POSTGRESQL
+    # -----------------------------------------------------
+
+    try:
+
+        inserted = save_security_event(
+            audit_event
+        )
+
+        if not inserted:
+            raise RuntimeError(
+                "Security audit event already exists."
+            )
+
+    except Exception:
+
+        logger.exception(
+            "PostgreSQL audit persistence failed."
+        )
+
+        # Do not return ALLOW if required
+        # database audit storage fails.
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Security audit database is unavailable."
+            ),
+        ) from None
+
+    # -----------------------------------------------------
+    # STEP 8: RETURN SECURITY DECISION
+    # -----------------------------------------------------
 
     return EvaluationResponse(
         event_id=audit_event["event_id"],
