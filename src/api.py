@@ -17,29 +17,52 @@ from src.purpose import (
 )
 
 from src.audit import write_security_event
+
 from src.event_store import save_security_event
+
+from src.event_routes import router as event_router
 
 
 # =========================================================
 # SYNTHSHIELD
-# Stage 7.9 - FastAPI and PostgreSQL Integration
+# Stage 8.2 - FastAPI, PostgreSQL and Authentication
 # =========================================================
 
 logger = logging.getLogger(__name__)
 
 
+# =========================================================
+# STEP 1 - INITIALIZE FASTAPI APPLICATION
+# =========================================================
+
 app = FastAPI(
     title="SYNTHSHIELD API",
     description=(
         "Sensitive Aggregation Inference Protection "
-        "with Purpose Lock and PostgreSQL Audit Logging"
+        "with Purpose Lock, PostgreSQL Audit Logging "
+        "and Authenticated Security Event Retrieval"
     ),
-    version="0.2.0",
+    version="0.3.0",
 )
 
 
 # =========================================================
-# REQUEST VALIDATION
+# STEP 2 - REGISTER AUTHENTICATED EVENT ROUTES
+# =========================================================
+
+# Registers the protected security-event retrieval routes
+# defined in src/event_routes.py.
+#
+# Example:
+# GET /v1/events/{event_id}
+#
+# Event retrieval requires a valid read API key.
+
+app.include_router(event_router)
+
+
+# =========================================================
+# STEP 3 - DEFINE SUPPORTED DATA SOURCES
 # =========================================================
 
 SourceName = Literal[
@@ -49,7 +72,14 @@ SourceName = Literal[
 ]
 
 
+# =========================================================
+# STEP 4 - API REQUEST MODEL
+# =========================================================
+
 class EvaluationRequest(BaseModel):
+    """
+    Define and validate incoming AI evaluation requests.
+    """
 
     requested_task: str = Field(
         min_length=1,
@@ -63,6 +93,9 @@ class EvaluationRequest(BaseModel):
 
     @model_validator(mode="after")
     def check_unique_sources(self):
+        """
+        Reject duplicate data sources.
+        """
 
         if len(self.sources) != len(set(self.sources)):
             raise ValueError(
@@ -73,10 +106,13 @@ class EvaluationRequest(BaseModel):
 
 
 # =========================================================
-# RESPONSE MODEL
+# STEP 5 - API RESPONSE MODEL
 # =========================================================
 
 class EvaluationResponse(BaseModel):
+    """
+    Define the security evaluation response.
+    """
 
     event_id: str
     agent_id: str
@@ -92,27 +128,47 @@ class EvaluationResponse(BaseModel):
 # ENDPOINT 1 - HEALTH CHECK
 # =========================================================
 
-@app.get("/health")
+@app.get(
+    "/health",
+    tags=["System Health"],
+)
 def health_check():
+    """
+    Check whether the SYNTHSHIELD API is running.
+    """
 
     return {
         "service": "SYNTHSHIELD",
         "status": "running",
-        "version": "0.2.0",
+        "version": "0.3.0",
     }
 
 
 # =========================================================
-# ENDPOINT 2 - SECURITY EVALUATION
+# ENDPOINT 2 - AI SECURITY EVALUATION
 # =========================================================
 
 @app.post(
     "/v1/evaluate",
     response_model=EvaluationResponse,
+    tags=["Security Evaluation"],
 )
 def evaluate_agent_action(
     request: EvaluationRequest,
 ):
+    """
+    Evaluate an AI agent's requested task.
+
+    The system checks:
+    1. Sensitive aggregation inference
+    2. Purpose policy violations
+    3. Combined security decision
+    4. JSONL audit logging
+    5. PostgreSQL audit persistence
+
+    The endpoint returns a policy decision.
+    It does not independently enforce that decision.
+    """
 
     # -----------------------------------------------------
     # STEP 1: LOAD REQUESTED DATA SOURCES
@@ -126,7 +182,7 @@ def evaluate_agent_action(
     }
 
     # -----------------------------------------------------
-    # STEP 2: DETECT SENSITIVE INFERENCE
+    # STEP 2: DETECT SENSITIVE AGGREGATION INFERENCE
     # -----------------------------------------------------
 
     inference_result = detect_sensitive_inference(
@@ -134,13 +190,13 @@ def evaluate_agent_action(
     )
 
     # -----------------------------------------------------
-    # STEP 3: LOAD THE APPROVED PURPOSE POLICY
+    # STEP 3: LOAD APPROVED PURPOSE POLICY
     # -----------------------------------------------------
 
     purpose_policy = load_purpose_policy()
 
     # -----------------------------------------------------
-    # STEP 4: EVALUATE PURPOSE DRIFT
+    # STEP 4: DETECT PURPOSE DRIFT
     # -----------------------------------------------------
 
     purpose_result = evaluate_purpose(
@@ -163,7 +219,7 @@ def evaluate_agent_action(
     )
 
     # -----------------------------------------------------
-    # STEP 6: WRITE JSONL AUDIT EVENT
+    # STEP 6: WRITE JSONL SECURITY AUDIT EVENT
     # -----------------------------------------------------
 
     audit_event = write_security_event(
@@ -175,7 +231,7 @@ def evaluate_agent_action(
     )
 
     # -----------------------------------------------------
-    # STEP 7: SAVE THE EVENT TO POSTGRESQL
+    # STEP 7: STORE THE SAME EVENT IN POSTGRESQL
     # -----------------------------------------------------
 
     try:
@@ -195,8 +251,9 @@ def evaluate_agent_action(
             "PostgreSQL audit persistence failed."
         )
 
-        # Do not return ALLOW if required
-        # database audit storage fails.
+        # Fail closed at the API-response level:
+        # do not return ALLOW when required
+        # audit persistence fails.
 
         raise HTTPException(
             status_code=503,
@@ -206,7 +263,7 @@ def evaluate_agent_action(
         ) from None
 
     # -----------------------------------------------------
-    # STEP 8: RETURN SECURITY DECISION
+    # STEP 8: RETURN FINAL SECURITY DECISION
     # -----------------------------------------------------
 
     return EvaluationResponse(
@@ -223,3 +280,8 @@ def evaluate_agent_action(
         decision=final_result["decision"],
         reasons=final_result["reasons"],
     )
+
+
+# =========================================================
+# END OF SYNTHSHIELD API
+# =========================================================
