@@ -452,3 +452,230 @@ def test_database_failure_returns_service_error(
     assert data["detail"] == (
         "Security audit database is unavailable."
     )
+
+# =========================================================
+# TEST 9 - DATABASE FAILURE LEAVES JSONL AUDIT RECORD
+# =========================================================
+
+def test_database_failure_keeps_jsonl_audit(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    """
+    Verify current behavior when PostgreSQL fails
+    after a JSONL audit event has been written.
+
+    This test demonstrates the partial-write
+    problem that Stage 8.4.3 will address.
+    """
+
+    def simulated_database_outage(event):
+        raise ConnectionError(
+            "Simulated PostgreSQL outage"
+        )
+
+    monkeypatch.setattr(
+        "src.api.save_security_event",
+        simulated_database_outage,
+    )
+
+    response = client.post(
+        "/v1/evaluate",
+        json={
+            "requested_task": (
+                "Prepare the monthly expense report."
+            ),
+            "sources": [
+                "finance",
+                "travel",
+            ],
+        },
+    )
+
+    # API must not return a successful ALLOW response.
+    assert response.status_code == 503
+
+    # However, the JSONL audit event was written
+    # before the PostgreSQL failure occurred.
+    log_file = tmp_path / "security_events.jsonl"
+
+    assert log_file.exists()
+
+    lines = log_file.read_text(
+        encoding="utf-8"
+    ).splitlines()
+
+    assert len(lines) == 1
+
+    event = json.loads(lines[0])
+
+    assert event["agent_id"] == "finance-agent-001"
+    assert event["decision"] == "ALLOW"
+
+    # The JSONL record exists, but the database
+    # insertion was simulated to fail.
+    # Recovery handling is not implemented yet.
+
+# =========================================================
+# TEST 10 - JOURNAL MUST BE WRITTEN BEFORE POSTGRESQL
+# =========================================================
+
+def test_recovery_journal_runs_before_database(
+    client,
+    monkeypatch,
+):
+
+    operations = []
+
+    def fake_journal(event):
+        operations.append(
+            ("journal", event["event_id"])
+        )
+        return "simulated-tag"
+
+    def fake_database(event):
+        operations.append(
+            ("database", event["event_id"])
+        )
+        return True
+
+    monkeypatch.setattr(
+        "src.api.append_recovery_event",
+        fake_journal,
+    )
+
+    monkeypatch.setattr(
+        "src.api.save_security_event",
+        fake_database,
+    )
+
+    response = client.post(
+        "/v1/evaluate",
+        json={
+            "requested_task": (
+                "Prepare the monthly expense report."
+            ),
+            "sources": [
+                "finance",
+                "travel",
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+
+    event_id = response.json()["event_id"]
+
+    assert operations == [
+        ("journal", event_id),
+        ("database", event_id),
+    ]
+
+
+# =========================================================
+# TEST 11 - JOURNAL FAILURE MUST STOP DATABASE INSERT
+# =========================================================
+
+def test_journal_failure_prevents_database_insert(
+    client,
+    monkeypatch,
+):
+
+    database_called = []
+
+    def failed_journal(event):
+        raise OSError(
+            "Simulated journal disk failure."
+        )
+
+    def fake_database(event):
+        database_called.append(event)
+        return True
+
+    monkeypatch.setattr(
+        "src.api.append_recovery_event",
+        failed_journal,
+    )
+
+    monkeypatch.setattr(
+        "src.api.save_security_event",
+        fake_database,
+    )
+
+    response = client.post(
+        "/v1/evaluate",
+        json={
+            "requested_task": (
+                "Prepare the monthly expense report."
+            ),
+            "sources": [
+                "finance",
+                "travel",
+            ],
+        },
+    )
+
+    assert response.status_code == 503
+
+    assert response.json()["detail"] == (
+        "Security recovery journal is unavailable."
+    )
+
+    assert database_called == []
+
+
+# =========================================================
+# TEST 12 - DATABASE OUTAGE PRESERVES JOURNAL ATTEMPT
+# =========================================================
+
+def test_database_failure_after_recovery_journal(
+    client,
+    monkeypatch,
+):
+
+    journaled_events = []
+
+    def fake_journal(event):
+        journaled_events.append(
+            event.copy()
+        )
+        return "simulated-tag"
+
+    def failed_database(event):
+        raise ConnectionError(
+            "Simulated PostgreSQL outage."
+        )
+
+    monkeypatch.setattr(
+        "src.api.append_recovery_event",
+        fake_journal,
+    )
+
+    monkeypatch.setattr(
+        "src.api.save_security_event",
+        failed_database,
+    )
+
+    response = client.post(
+        "/v1/evaluate",
+        json={
+            "requested_task": (
+                "Analyze whether the company "
+                "may be acquiring AlphaCorp."
+            ),
+            "sources": [
+                "calendar",
+                "travel",
+                "finance",
+            ],
+        },
+    )
+
+    assert response.status_code == 503
+
+    assert len(journaled_events) == 1
+
+    assert journaled_events[0]["decision"] == "BLOCK"
+
+    assert journaled_events[0]["risk_level"] == "CRITICAL"

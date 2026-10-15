@@ -19,6 +19,7 @@ from src.purpose import (
 from src.audit import write_security_event
 
 from src.event_store import save_security_event
+from src.recovery_journal import append_recovery_event
 
 from src.event_routes import router as event_router
 
@@ -229,6 +230,30 @@ def evaluate_agent_action(
         purpose_analysis=purpose_result,
         final_security_result=final_result,
     )
+
+    # -----------------------------------------------------
+    # STEP 7: SAVE AUTHENTICATED RECOVERY JOURNAL ENTRY
+    # -----------------------------------------------------
+
+    try:
+        append_recovery_event(audit_event)
+
+    except Exception:
+
+        logger.exception(
+            "Security recovery journal write failed."
+        )
+
+        # Required audit journaling failed.
+        # Do not proceed to PostgreSQL or return ALLOW.
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Security recovery journal is unavailable."
+            ),
+        ) from None
+
 
     # -----------------------------------------------------
     # STEP 7: STORE THE SAME EVENT IN POSTGRESQL
