@@ -1,4 +1,36 @@
 
+"""
+SYNTHSHIELD
+FASTAPI AUTOMATED SECURITY TESTS
+
+Stage 8.4.3 C3 - Isolated API Tests
+
+This test suite verifies:
+
+1. API health
+2. Legitimate task authorization
+3. Sensitive inference blocking
+4. Unknown source validation
+5. Duplicate source validation
+6. JSONL audit logging
+7. PostgreSQL persistence
+8. PostgreSQL failure handling
+9. JSONL audit preservation during database failure
+10. Recovery journal and database operation ordering
+11. Recovery journal failure handling
+12. Database failure after recovery journaling
+
+IMPORTANT:
+All API unit tests are isolated from real persistence:
+
+- JSONL audit events use temporary files.
+- Recovery journal writes are mocked.
+- PostgreSQL inserts are mocked.
+
+No real recovery-journal or database records should be
+created by these API tests.
+"""
+
 import json
 
 import pytest
@@ -10,28 +42,26 @@ from src.audit import write_security_event
 
 
 # =========================================================
-# SYNTHSHIELD
-# FASTAPI AUTOMATED SECURITY TESTS
-# Stage 7.9 - PostgreSQL Audit Integration
-# =========================================================
-
-
-# ---------------------------------------------------------
 # TEST CLIENT FIXTURE
-# ---------------------------------------------------------
+# =========================================================
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     """
     Create an isolated FastAPI test client.
 
-    1. Store JSONL audit events in a temporary folder.
-    2. Mock PostgreSQL persistence to avoid modifying
-       the real SYNTHSHIELD database.
-    3. Restore original functions after each test.
+    JSONL logging is redirected to a temporary file.
+
+    Recovery-journal writes and PostgreSQL persistence
+    are mocked to prevent changes to real audit storage.
+
+    Monkeypatch restores the original functions after
+    each test.
     """
 
-    # Create an isolated JSONL audit-writing function.
+    # -----------------------------------------------------
+    # MOCK 1: ISOLATED JSONL AUDIT LOG
+    # -----------------------------------------------------
 
     def write_test_event(**kwargs):
 
@@ -40,24 +70,41 @@ def client(tmp_path, monkeypatch):
             log_file=tmp_path / "security_events.jsonl",
         )
 
-    # Replace the real JSONL writer during testing.
-
     monkeypatch.setattr(
         "src.api.write_security_event",
         write_test_event,
     )
 
-    # Replace real PostgreSQL storage with a successful
-    # mock database operation.
+    # -----------------------------------------------------
+    # MOCK 2: AUTHENTICATED RECOVERY JOURNAL
+    # -----------------------------------------------------
+
+    # Prevent automated API tests from writing to the
+    # real audit_logs/recovery_journal.jsonl file.
+
+    monkeypatch.setattr(
+        "src.api.append_recovery_event",
+        lambda event: "simulated-journal-tag",
+    )
+
+    # -----------------------------------------------------
+    # MOCK 3: POSTGRESQL EVENT STORAGE
+    # -----------------------------------------------------
+
+    # Prevent API tests from inserting records
+    # into the real PostgreSQL database.
 
     monkeypatch.setattr(
         "src.api.save_security_event",
         lambda event: True,
     )
 
-    # Create the FastAPI test client.
+    # -----------------------------------------------------
+    # CREATE FASTAPI TEST CLIENT
+    # -----------------------------------------------------
 
     with TestClient(app) as test_client:
+
         yield test_client
 
 
@@ -67,7 +114,7 @@ def client(tmp_path, monkeypatch):
 
 def test_api_health(client):
     """
-    Verify that the SYNTHSHIELD API is responding.
+    Verify that the SYNTHSHIELD API responds correctly.
     """
 
     response = client.get("/health")
@@ -87,8 +134,8 @@ def test_api_health(client):
 
 def test_legitimate_task_is_allowed(client):
     """
-    Verify that an authorized expense-reporting task
-    using Finance and Travel data is allowed.
+    A legitimate monthly expense-reporting task using
+    Finance and Travel data should be allowed.
     """
 
     request_data = {
@@ -127,8 +174,8 @@ def test_legitimate_task_is_allowed(client):
 
 def test_sensitive_acquisition_task_is_blocked(client):
     """
-    Verify that combining Calendar, Travel, and Finance
-    data for acquisition analysis results in BLOCK.
+    Combining Calendar, Travel, and Finance data for
+    sensitive acquisition analysis must result in BLOCK.
     """
 
     request_data = {
@@ -179,8 +226,8 @@ def test_sensitive_acquisition_task_is_blocked(client):
 
 def test_unknown_source_is_rejected(client):
     """
-    Verify that unsupported data sources are rejected
-    during API request validation.
+    Unsupported data sources must be rejected during
+    request validation.
     """
 
     request_data = {
@@ -207,7 +254,7 @@ def test_unknown_source_is_rejected(client):
 
 def test_duplicate_sources_are_rejected(client):
     """
-    Verify that duplicate data sources are rejected.
+    The same source must not be submitted multiple times.
     """
 
     request_data = {
@@ -234,10 +281,10 @@ def test_duplicate_sources_are_rejected(client):
 
 def test_api_creates_audit_event(client, tmp_path):
     """
-    Verify that an API request creates a JSONL audit event.
+    Verify that an API request creates a JSONL event.
 
-    The test must not store inferred confidential
-    information in the audit record.
+    The audit log must contain security metadata,
+    not inferred confidential information.
     """
 
     request_data = {
@@ -261,25 +308,19 @@ def test_api_creates_audit_event(client, tmp_path):
 
     data = response.json()
 
+    # Temporary audit log used by the test fixture.
+
     log_file = (
         tmp_path / "security_events.jsonl"
     )
 
-    # Verify that the audit file exists.
-
     assert log_file.exists()
-
-    # Read all audit events.
 
     lines = log_file.read_text(
         encoding="utf-8"
     ).splitlines()
 
-    # Exactly one event should exist.
-
     assert len(lines) == 1
-
-    # Convert the saved JSON text into a dictionary.
 
     event = json.loads(lines[0])
 
@@ -293,7 +334,8 @@ def test_api_creates_audit_event(client, tmp_path):
 
     assert event["sensitive_inference"] is True
 
-    # Ensure protected inference content is not stored.
+    # Confidential inference content must not
+    # be written into the audit log.
 
     assert "AlphaCorp" not in lines[0]
 
@@ -312,16 +354,13 @@ def test_api_saves_event_to_postgresql(
     monkeypatch,
 ):
     """
-    Verify that FastAPI passes the generated audit event
+    Verify FastAPI submits the generated audit event
     to the PostgreSQL storage function.
 
-    This test mocks the database call rather than
-    writing to the real PostgreSQL database.
+    The database is mocked; no real insert occurs.
     """
 
     saved_events = []
-
-    # Create a fake PostgreSQL insert function.
 
     def fake_database_save(event):
 
@@ -330,8 +369,6 @@ def test_api_saves_event_to_postgresql(
         )
 
         return True
-
-    # Replace the database function with our test version.
 
     monkeypatch.setattr(
         "src.api.save_security_event",
@@ -359,13 +396,9 @@ def test_api_saves_event_to_postgresql(
 
     data = response.json()
 
-    # Confirm the database function was called once.
-
     assert len(saved_events) == 1
 
     stored_event = saved_events[0]
-
-    # Verify that the correct event was submitted.
 
     assert (
         stored_event["event_id"]
@@ -407,21 +440,15 @@ def test_database_failure_returns_service_error(
     monkeypatch,
 ):
     """
-    Simulate PostgreSQL being unavailable.
-
-    SYNTHSHIELD must not return a successful ALLOW
-    response when required database auditing fails.
+    When PostgreSQL is unavailable, the API must
+    return HTTP 503 instead of a successful response.
     """
-
-    # Create a fake function that simulates an outage.
 
     def simulate_database_failure(event):
 
         raise ConnectionError(
             "Simulated PostgreSQL database outage."
         )
-
-    # Replace PostgreSQL save function with failure.
 
     monkeypatch.setattr(
         "src.api.save_security_event",
@@ -443,8 +470,6 @@ def test_database_failure_returns_service_error(
         json=request_data,
     )
 
-    # The API must return Service Unavailable.
-
     assert response.status_code == 503
 
     data = response.json()
@@ -452,6 +477,7 @@ def test_database_failure_returns_service_error(
     assert data["detail"] == (
         "Security audit database is unavailable."
     )
+
 
 # =========================================================
 # TEST 9 - DATABASE FAILURE LEAVES JSONL AUDIT RECORD
@@ -463,16 +489,16 @@ def test_database_failure_keeps_jsonl_audit(
     monkeypatch,
 ):
     """
-    Verify current behavior when PostgreSQL fails
-    after a JSONL audit event has been written.
+    Verify existing behavior when PostgreSQL fails
+    after the JSONL audit event has been written.
 
-    This test demonstrates the partial-write
-    problem that Stage 8.4.3 will address.
+    The JSONL record should remain available.
     """
 
     def simulated_database_outage(event):
+
         raise ConnectionError(
-            "Simulated PostgreSQL outage"
+            "Simulated PostgreSQL outage."
         )
 
     monkeypatch.setattr(
@@ -493,12 +519,11 @@ def test_database_failure_keeps_jsonl_audit(
         },
     )
 
-    # API must not return a successful ALLOW response.
     assert response.status_code == 503
 
-    # However, the JSONL audit event was written
-    # before the PostgreSQL failure occurred.
-    log_file = tmp_path / "security_events.jsonl"
+    log_file = (
+        tmp_path / "security_events.jsonl"
+    )
 
     assert log_file.exists()
 
@@ -511,33 +536,44 @@ def test_database_failure_keeps_jsonl_audit(
     event = json.loads(lines[0])
 
     assert event["agent_id"] == "finance-agent-001"
+
     assert event["decision"] == "ALLOW"
 
-    # The JSONL record exists, but the database
-    # insertion was simulated to fail.
-    # Recovery handling is not implemented yet.
+    # The event remains in the temporary JSONL log.
+    # The PostgreSQL insertion was simulated to fail.
+
 
 # =========================================================
-# TEST 10 - JOURNAL MUST BE WRITTEN BEFORE POSTGRESQL
+# TEST 10 - JOURNAL MUST RUN BEFORE POSTGRESQL
 # =========================================================
 
 def test_recovery_journal_runs_before_database(
     client,
     monkeypatch,
 ):
+    """
+    Verify that the authenticated recovery journal
+    is called before PostgreSQL persistence.
+
+    Both operations are mocked.
+    """
 
     operations = []
 
     def fake_journal(event):
+
         operations.append(
             ("journal", event["event_id"])
         )
+
         return "simulated-tag"
 
     def fake_database(event):
+
         operations.append(
             ("database", event["event_id"])
         )
+
         return True
 
     monkeypatch.setattr(
@@ -581,16 +617,23 @@ def test_journal_failure_prevents_database_insert(
     client,
     monkeypatch,
 ):
+    """
+    If recovery journaling fails, SYNTHSHIELD
+    must not proceed with PostgreSQL persistence.
+    """
 
     database_called = []
 
     def failed_journal(event):
+
         raise OSError(
             "Simulated journal disk failure."
         )
 
     def fake_database(event):
+
         database_called.append(event)
+
         return True
 
     monkeypatch.setattr(
@@ -626,23 +669,33 @@ def test_journal_failure_prevents_database_insert(
 
 
 # =========================================================
-# TEST 12 - DATABASE OUTAGE PRESERVES JOURNAL ATTEMPT
+# TEST 12 - DATABASE OUTAGE AFTER RECOVERY JOURNAL
 # =========================================================
 
 def test_database_failure_after_recovery_journal(
     client,
     monkeypatch,
 ):
+    """
+    Simulate successful recovery journaling followed
+    by a PostgreSQL failure.
+
+    Confirm that journaling was attempted before
+    the database operation failed.
+    """
 
     journaled_events = []
 
     def fake_journal(event):
+
         journaled_events.append(
             event.copy()
         )
+
         return "simulated-tag"
 
     def failed_database(event):
+
         raise ConnectionError(
             "Simulated PostgreSQL outage."
         )
@@ -676,6 +729,12 @@ def test_database_failure_after_recovery_journal(
 
     assert len(journaled_events) == 1
 
-    assert journaled_events[0]["decision"] == "BLOCK"
+    assert (
+        journaled_events[0]["decision"]
+        == "BLOCK"
+    )
 
-    assert journaled_events[0]["risk_level"] == "CRITICAL"
+    assert (
+        journaled_events[0]["risk_level"]
+        == "CRITICAL"
+    )
