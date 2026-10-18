@@ -1,130 +1,176 @@
 
 """
-SYNTHSHIELD - Phase 9B
+SYNTHSHIELD - Phase 10.3C
 
-Live security-gateway demonstration.
+Credential-Verified Agent Gateway Demonstration
 
-Calls the real local FastAPI policy endpoint.
-Tools return synthetic records only.
+Uses:
+- Real local FastAPI security evaluation
+- PostgreSQL coalition state
+- Coordinator-issued agent credentials
+- Synthetic data-access tools
 
-No external AI provider or real business data.
+No live business data is accessed.
 """
 
-from src.agent_gateway import (
-    AccessDenied,
-    PolicyUnavailable,
-    run_guarded_task,
+from uuid import uuid4
+
+from src.agent_gateway import AccessDenied
+
+from src.authorized_agent_gateway import (
+    AuthorizedAgentGateway,
+    create_coalition_scope,
+    provision_workflow_agent,
+    get_coalition_sources,
 )
 
+from src.database import get_database_connection
+
+
+TASK = "Prepare the monthly expense report."
 
 executed_tools = []
 
 
-def finance_tool():
-    executed_tools.append("finance")
+def create_authorized_agent(scope_id, agent_name, source):
+    """
+    Provision a synthetic agent through the
+    trusted coordinator function.
 
-    return {
-        "monthly_expenses": 12500,
-        "currency": "INR",
-    }
+    In this local demonstration, provisioning
+    occurs in the same Python process.
+    """
 
+    identity = provision_workflow_agent(
+        scope_id=scope_id,
+        agent_id=agent_name,
+        allowed_sources=[source],
+    )
 
-def travel_tool():
-    executed_tools.append("travel")
+    def protected_tool():
+        executed_tools.append(source)
+        return f"synthetic-{source}-data"
 
-    return {
-        "monthly_travel_cost": 3500,
-        "currency": "INR",
-    }
-
-
-def calendar_tool():
-    executed_tools.append("calendar")
-
-    return {
-        "meeting_count": 4,
-    }
-
-
-TOOLS = {
-    "finance": finance_tool,
-    "travel": travel_tool,
-    "calendar": calendar_tool,
-}
+    return AuthorizedAgentGateway(
+        credential=identity["credential"],
+        tools={source: protected_tool},
+    )
 
 
-def run_demo():
+def main():
+    scope_id = None
 
-    # --------------------------------------------------
-    # SCENARIO 1 - LEGITIMATE TASK
-    # --------------------------------------------------
-
-    print("\nSCENARIO 1: Legitimate Expense Report")
-
-    executed_tools.clear()
+    print("=" * 55)
+    print("SYNTHSHIELD - AUTHORIZED AGENT SECURITY DEMO")
+    print("=" * 55)
 
     try:
-        result = run_guarded_task(
-            task="Prepare the monthly expense report.",
-            sources=["finance", "travel"],
-            tools=TOOLS,
+        # -----------------------------------------
+        # 1. Create trusted coalition scope
+        # -----------------------------------------
+
+        scope_id = create_coalition_scope(TASK)
+
+        print("[PASS] Coalition scope created")
+
+        # -----------------------------------------
+        # 2. Verify unknown credential is denied
+        # -----------------------------------------
+
+        intruder = AuthorizedAgentGateway(
+            credential=f"unissued-{uuid4()}",
+            tools={
+                "finance": lambda: executed_tools.append(
+                    "intruder"
+                ),
+            },
         )
+
+        try:
+            intruder.access("finance")
+
+        except AccessDenied:
+            print("[PASS] Unknown credential rejected")
+
+        else:
+            raise AssertionError(
+                "Unissued credential was accepted."
+            )
+
+        assert executed_tools == []
+
+        # -----------------------------------------
+        # 3. Provision authorized agents
+        # -----------------------------------------
+
+        finance_agent = create_authorized_agent(
+            scope_id, "finance-agent", "finance"
+        )
+
+        travel_agent = create_authorized_agent(
+            scope_id, "travel-agent", "travel"
+        )
+
+        calendar_agent = create_authorized_agent(
+            scope_id, "calendar-agent", "calendar"
+        )
+
+        # -----------------------------------------
+        # 4. Exercise the real policy gateway
+        # -----------------------------------------
+
+        finance_agent.access("finance")
+        print("[PASS] Finance agent authorized")
+
+        travel_agent.access("travel")
+        print("[PASS] Travel agent authorized")
+
+        try:
+            calendar_agent.access("calendar")
+
+        except AccessDenied:
+            print("[PASS] Calendar access blocked")
+
+        else:
+            raise AssertionError(
+                "Unsafe calendar access was allowed."
+            )
+
+        # -----------------------------------------
+        # 5. Verify shared state and tool execution
+        # -----------------------------------------
 
         assert executed_tools == [
             "finance",
             "travel",
         ]
 
-        assert "finance" in result
-        assert "travel" in result
-
-        print("[PASS] SYNTHSHIELD authorized access")
-        print("[PASS] Finance tool executed")
-        print("[PASS] Travel tool executed")
-
-    except (AccessDenied, PolicyUnavailable):
-        print("[FAIL] Legitimate task was not allowed")
-        raise
-
-    # --------------------------------------------------
-    # SCENARIO 2 - SENSITIVE ACQUISITION
-    # --------------------------------------------------
-
-    print("\nSCENARIO 2: Sensitive Acquisition Analysis")
-
-    executed_tools.clear()
-
-    try:
-        run_guarded_task(
-            task=(
-                "Analyze whether the company "
-                "may be acquiring AlphaCorp."
-            ),
-            sources=[
-                "calendar",
-                "travel",
-                "finance",
-            ],
-            tools=TOOLS,
+        assert get_coalition_sources(scope_id) == (
+            "finance",
+            "travel",
         )
 
-    except AccessDenied:
-        print("[PASS] SYNTHSHIELD blocked access")
+        print("[PASS] Shared coalition history verified")
+        print("[PASS] No blocked tool executed")
 
-    else:
-        raise AssertionError(
-            "Sensitive tool request was not blocked."
-        )
+        print("=" * 55)
+        print("CREDENTIAL-VERIFIED DEMO SUCCESSFUL")
+        print("=" * 55)
 
-    assert executed_tools == []
+    finally:
+        if scope_id is not None:
+            with get_database_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        DELETE FROM coalition_scopes
+                        WHERE scope_id = %s
+                        """,
+                        (scope_id,),
+                    )
 
-    print("[PASS] No protected tools executed")
-    print("[PASS] No source data returned")
-
-    print("\n" + "=" * 55)
-    print("LIVE AGENT GATEWAY DEMONSTRATION SUCCESSFUL")
-    print("=" * 55)
+            print("[INFO] Synthetic scope cleaned up")
 
 
 if __name__ == "__main__":
-    run_demo()
+    main()
