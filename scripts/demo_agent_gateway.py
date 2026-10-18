@@ -1,16 +1,20 @@
 
 """
-SYNTHSHIELD - Phase 10.3C
+SYNTHSHIELD - Phase 10.3M
 
-Credential-Verified Agent Gateway Demonstration
+Trusted-Context Agent Gateway Demonstration
 
-Uses:
-- Real local FastAPI security evaluation
-- PostgreSQL coalition state
+Features:
+- Trusted context assignment
+- Shared coalition scope
 - Coordinator-issued agent credentials
-- Synthetic data-access tools
+- Unknown credential rejection
+- Finance and travel authorization
+- Calendar access denial
+- PostgreSQL coalition history verification
+- Automatic test-data cleanup
 
-No live business data is accessed.
+Uses synthetic tools only.
 """
 
 from uuid import uuid4
@@ -19,26 +23,33 @@ from src.agent_gateway import AccessDenied
 
 from src.authorized_agent_gateway import (
     AuthorizedAgentGateway,
-    create_coalition_scope,
+    get_or_create_coalition_scope,
     provision_workflow_agent,
     get_coalition_sources,
 )
 
-from src.database import get_database_connection
+from src.database import get_coordinator_connection
 
 
 TASK = "Prepare the monthly expense report."
 
-executed_tools = []
 
+# =====================================================
+# 1. CREATE AUTHORIZED AGENT
+# =====================================================
 
-def create_authorized_agent(scope_id, agent_name, source):
+def create_authorized_agent(
+    scope_id,
+    agent_name,
+    source,
+    executed_tools,
+):
     """
     Provision a synthetic agent through the
-    trusted coordinator function.
+    trusted coordinator.
 
-    In this local demonstration, provisioning
-    occurs in the same Python process.
+    Every related agent receives the same
+    authoritative coalition scope.
     """
 
     identity = provision_workflow_agent(
@@ -57,25 +68,60 @@ def create_authorized_agent(scope_id, agent_name, source):
     )
 
 
+# =====================================================
+# 2. MAIN SECURITY DEMONSTRATION
+# =====================================================
+
 def main():
+
+    # Trusted coordinator creates one context.
+    # Agents cannot choose or reset this ID.
+
+    context_id = uuid4()
+
     scope_id = None
 
+    executed_tools = []
+
     print("=" * 55)
-    print("SYNTHSHIELD - AUTHORIZED AGENT SECURITY DEMO")
+    print("SYNTHSHIELD - TRUSTED CONTEXT AGENT DEMO")
     print("=" * 55)
 
     try:
-        # -----------------------------------------
-        # 1. Create trusted coalition scope
-        # -----------------------------------------
 
-        scope_id = create_coalition_scope(TASK)
+        # ---------------------------------------------
+        # STEP 1 - CREATE TRUSTED COALITION SCOPE
+        # ---------------------------------------------
 
-        print("[PASS] Coalition scope created")
+        scope_id = get_or_create_coalition_scope(
+            context_id=context_id,
+            task=TASK,
+        )
 
-        # -----------------------------------------
-        # 2. Verify unknown credential is denied
-        # -----------------------------------------
+        print("[PASS] Trusted coalition scope assigned")
+
+        # ---------------------------------------------
+        # STEP 2 - VERIFY SCOPE REUSE
+        # ---------------------------------------------
+
+        second_scope_id = get_or_create_coalition_scope(
+            context_id=context_id,
+            task=TASK,
+        )
+
+        assert second_scope_id == scope_id, (
+            "Security failure: related workflows "
+            "received different scopes"
+        )
+
+        print(
+            "[PASS] Same trusted context reuses "
+            "the same coalition scope"
+        )
+
+        # ---------------------------------------------
+        # STEP 3 - TEST UNKNOWN CREDENTIAL
+        # ---------------------------------------------
 
         intruder = AuthorizedAgentGateway(
             credential=f"unissued-{uuid4()}",
@@ -87,90 +133,156 @@ def main():
         )
 
         try:
+
             intruder.access("finance")
 
         except AccessDenied:
+
             print("[PASS] Unknown credential rejected")
 
         else:
+
             raise AssertionError(
-                "Unissued credential was accepted."
+                "Unissued credential was accepted"
             )
 
         assert executed_tools == []
 
-        # -----------------------------------------
-        # 3. Provision authorized agents
-        # -----------------------------------------
+        # ---------------------------------------------
+        # STEP 4 - PROVISION AUTHORIZED AGENTS
+        # ---------------------------------------------
 
         finance_agent = create_authorized_agent(
-            scope_id, "finance-agent", "finance"
+            scope_id,
+            "finance-agent",
+            "finance",
+            executed_tools,
         )
 
         travel_agent = create_authorized_agent(
-            scope_id, "travel-agent", "travel"
+            second_scope_id,
+            "travel-agent",
+            "travel",
+            executed_tools,
         )
 
         calendar_agent = create_authorized_agent(
-            scope_id, "calendar-agent", "calendar"
+            scope_id,
+            "calendar-agent",
+            "calendar",
+            executed_tools,
         )
 
-        # -----------------------------------------
-        # 4. Exercise the real policy gateway
-        # -----------------------------------------
+        print("[PASS] Authorized agents provisioned")
+
+        # ---------------------------------------------
+        # STEP 5 - FINANCE ACCESS
+        # ---------------------------------------------
 
         finance_agent.access("finance")
+
         print("[PASS] Finance agent authorized")
 
+        # ---------------------------------------------
+        # STEP 6 - TRAVEL ACCESS
+        # ---------------------------------------------
+
         travel_agent.access("travel")
+
         print("[PASS] Travel agent authorized")
 
+        # ---------------------------------------------
+        # STEP 7 - CALENDAR ACCESS ATTEMPT
+        # ---------------------------------------------
+
         try:
+
             calendar_agent.access("calendar")
 
         except AccessDenied:
-            print("[PASS] Calendar access blocked")
+
+            print("[PASS] Calendar access denied")
 
         else:
+
             raise AssertionError(
-                "Unsafe calendar access was allowed."
+                "Unsafe calendar access was allowed"
             )
 
-        # -----------------------------------------
-        # 5. Verify shared state and tool execution
-        # -----------------------------------------
+        # ---------------------------------------------
+        # STEP 8 - VERIFY TOOL EXECUTION
+        # ---------------------------------------------
 
         assert executed_tools == [
             "finance",
             "travel",
-        ]
+        ], (
+            f"Unexpected tool execution history: "
+            f"{executed_tools}"
+        )
 
-        assert get_coalition_sources(scope_id) == (
+        print("[PASS] Only approved tools executed")
+
+        # ---------------------------------------------
+        # STEP 9 - VERIFY POSTGRESQL COALITION STATE
+        # ---------------------------------------------
+
+        coalition_history = get_coalition_sources(
+            scope_id
+        )
+
+        assert coalition_history == (
             "finance",
             "travel",
         )
 
         print("[PASS] Shared coalition history verified")
-        print("[PASS] No blocked tool executed")
+
+        # ---------------------------------------------
+        # STEP 10 - FINAL RESULT
+        # ---------------------------------------------
 
         print("=" * 55)
-        print("CREDENTIAL-VERIFIED DEMO SUCCESSFUL")
+        print("TRUSTED CONTEXT SECURITY DEMO SUCCESSFUL")
         print("=" * 55)
 
     finally:
+
+        # ---------------------------------------------
+        # CLEAN UP TEMPORARY DATABASE RECORDS
+        # ---------------------------------------------
+
         if scope_id is not None:
-            with get_database_connection() as connection:
+
+            with get_coordinator_connection() as connection:
+
                 with connection.cursor() as cursor:
+
                     cursor.execute(
                         """
                         DELETE FROM coalition_scopes
+
                         WHERE scope_id = %s
+                          AND context_id = %s
                         """,
-                        (scope_id,),
+                        (
+                            scope_id,
+                            context_id,
+                        ),
                     )
 
-            print("[INFO] Synthetic scope cleaned up")
+            # Existing ON DELETE CASCADE removes
+            # related temporary agent memberships.
 
+            print(
+                "[INFO] Temporary agent identities "
+                "and coalition scope cleaned up"
+            )
+
+
+# =====================================================
+# PROGRAM ENTRY POINT
+# =====================================================
 
 if __name__ == "__main__":
     main()

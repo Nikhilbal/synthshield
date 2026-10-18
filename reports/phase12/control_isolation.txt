@@ -1,0 +1,51 @@
+================================================================
+SYNTHSHIELD - PHASE 11F INDEPENDENT SECURITY CONTROLS
+================================================================
+
+CASE 1: Inference ALLOW / Purpose ALLOW
+  Sources:              finance, travel
+  Triggered signals:    2
+  Inference risk:       45/100 (MEDIUM)
+  Inference decision:   ALLOW
+  Purpose decision:     ALLOW
+  Final decision:       ALLOW
+  Reasons:              No sensitive inference or purpose violation detected.
+  [PASS] Isolated decisions match expected outcome
+
+CASE 2: Inference ALLOW / Purpose BLOCK
+  Sources:              calendar
+  Triggered signals:    1
+  Inference risk:       20/100 (LOW)
+  Inference decision:   ALLOW
+  Purpose decision:     BLOCK
+  Final decision:       BLOCK
+  Reasons:              Purpose drift detected.
+  [PASS] Isolated decisions match expected outcome
+
+CASE 3: Inference BLOCK / Purpose ALLOW (in-memory test policy)
+  Sources:              calendar, travel, finance
+  Triggered signals:    3
+  Inference risk:       95/100 (CRITICAL)
+  Inference decision:   BLOCK
+  Purpose decision:     ALLOW
+  Final decision:       BLOCK
+  Reasons:              Sensitive aggregation inference detected.
+  [PASS] Isolated decisions match expected outcome
+
+CASE 4: Inference BLOCK / Purpose BLOCK
+  Sources:              calendar, travel, finance
+  Triggered signals:    3
+  Inference risk:       95/100 (CRITICAL)
+  Inference decision:   BLOCK
+  Purpose decision:     BLOCK
+  Final decision:       BLOCK
+  Reasons:              Sensitive aggregation inference detected.; Purpose drift detected.
+  [PASS] Isolated decisions match expected outcome
+
+================================================================
+[PASS] All four security-control combinations verified
+[PASS] Coalition detector blocks even when Purpose Lock allows
+[PASS] Purpose Lock blocks even when coalition detector allows
+[PASS] Original purpose policy unchanged
+PHASE 11F SECURITY CONTROL ISOLATION COMPLETE
+================================================================

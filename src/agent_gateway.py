@@ -22,6 +22,7 @@ prevent an agent from bypassing the gateway.
 """
 
 import json
+import os
 
 from urllib.request import Request, urlopen
 from urllib.error import URLError
@@ -31,8 +32,10 @@ from urllib.error import URLError
 # CONFIGURATION
 # =========================================================
 
-API_URL = "http://127.0.0.1:8000/v1/evaluate"
-
+API_URL = os.getenv(
+    "SYNTHSHIELD_EVALUATION_URL",
+    "http://127.0.0.1:8000/v1/evaluate",
+)
 API_TIMEOUT = 5
 
 ALLOWED_SOURCES = {
