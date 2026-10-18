@@ -12,6 +12,20 @@ An AI agent can collect individually permissible facts from different systems an
 
 SYNTHSHIELD explores a defense-in-depth approach to this problem. The language model selects a tool action; a separate trusted gateway checks the agent's credentials, allowed sources, workflow context, purpose, and the inferred risk of the resulting data-source coalition **before** executing the protected tool.
 
+## Dashboard preview — retro security console
+
+![SYNTHSHIELD retro security dashboard showing recorded security evidence](docs/images/synthshield-retro-dashboard.png)
+
+*Actual screenshot of the local, read-only research-evidence dashboard. It visualizes saved experiment results (106 passing tests, control-isolation scenarios, risk scores, and authorized/denied tool requests); it is **not** live telemetry. The numbers are from synthetic research fixtures.*
+
+**Launch locally:**
+
+```bash
+python -m scripts.synthshield_dashboard_retro
+```
+
+Open [`http://127.0.0.1:8766`](http://127.0.0.1:8766) on the same computer while the script runs. This `localhost` link is **not** an internet-hosted public demo. The screenshot above is what GitHub visitors can view without running the application.
+
 ## Architecture
 
 ```mermaid
@@ -99,7 +113,7 @@ The standalone control-isolation experiment reads synthetic records from `data/`
 
 ### Optional retro-style evidence dashboard
 
-A separately maintained retro/CRT-style launcher can be used to display the **same recorded evidence** with vintage terminal styling. It should import the existing dashboard parser and change only its presentation; it is not a security-feature upgrade or real-time monitoring system.
+Run `python -m scripts.synthshield_dashboard_retro` and open `http://127.0.0.1:8766`. This launcher imports the existing dashboard's evidence parser and changes only the visual theme. **Both versions read recorded evidence; neither is a live monitoring service.** The original dashboard remains at `http://127.0.0.1:8765` when run using `python scripts/synthshield_dashboard.py`.
 
 ## Full local AI-agent / Docker demonstration (advanced)
 
